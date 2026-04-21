@@ -3,7 +3,7 @@ import { Html5Qrcode } from 'html5-qrcode'
 import { supabase } from '../supabaseClient'
 import { ITEMS } from '../lib/items'
 import { useNavigate } from 'react-router-dom'
-import { Camera, LayoutDashboard, LogOut, ScanLine } from 'lucide-react'
+import { Camera, CheckCircle2, LayoutDashboard, LogOut, ScanLine, XCircle } from 'lucide-react'
 import Layout from '../components/Layout'
 
 const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i
@@ -12,21 +12,74 @@ export default function ScannerPage() {
   const scannerRef = useRef(null)
   const scanLockRef = useRef(false)
   const lastProcessedRef = useRef({ value: '', time: 0 })
+  const feedbackTimeoutRef = useRef(null)
+  const audioContextRef = useRef(null)
   const [scanning, setScanning] = useState(false)
   const [selectedItem, setSelectedItem] = useState(ITEMS[0].key)
   const [manualCode, setManualCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
+  const [frameFeedback, setFrameFeedback] = useState(null)
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
-    return () => { if (scannerRef.current) scannerRef.current.stop().catch(() => {}) }
+    return () => {
+      if (scannerRef.current) scannerRef.current.stop().catch(() => {})
+      if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current)
+    }
   }, [])
 
   const selectedItemMeta = ITEMS.find(item => item.key === selectedItem) || ITEMS[0]
 
+  function ensureAudioReady() {
+    if (!audioContextRef.current) {
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      if (!Ctx) return null
+      audioContextRef.current = new Ctx()
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {})
+    }
+    return audioContextRef.current
+  }
+
+  function playTone(type) {
+    const audioCtx = ensureAudioReady()
+    if (!audioCtx) return
+    const now = audioCtx.currentTime
+
+    const notes = type === 'success'
+      ? [{ freq: 880, offset: 0, duration: 0.08 }, { freq: 1174, offset: 0.09, duration: 0.11 }]
+      : [{ freq: 280, offset: 0, duration: 0.12 }, { freq: 210, offset: 0.11, duration: 0.15 }]
+
+    notes.forEach((note) => {
+      const osc = audioCtx.createOscillator()
+      const gain = audioCtx.createGain()
+      osc.type = type === 'success' ? 'sine' : 'triangle'
+      osc.frequency.setValueAtTime(note.freq, now + note.offset)
+      gain.gain.setValueAtTime(0.0001, now + note.offset)
+      gain.gain.exponentialRampToValueAtTime(0.06, now + note.offset + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + note.offset + note.duration)
+      osc.connect(gain)
+      gain.connect(audioCtx.destination)
+      osc.start(now + note.offset)
+      osc.stop(now + note.offset + note.duration)
+    })
+  }
+
+  function emitFeedback(type, text) {
+    setResult({ type, text })
+    setFrameFeedback({ type, text })
+
+    if (type === 'success' || type === 'error') playTone(type)
+
+    if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current)
+    feedbackTimeoutRef.current = window.setTimeout(() => setFrameFeedback(null), 800)
+  }
+
   async function startScanner() {
+    ensureAudioReady()
     setError('')
     setResult(null)
     const scanner = scannerRef.current || new Html5Qrcode('qr-reader')
@@ -51,10 +104,7 @@ export default function ScannerPage() {
 
   async function applyCheckIn(participant) {
     if (participant[selectedItem]) {
-      setResult({
-        type: 'info',
-        text: `${participant.name} is already checked in for ${selectedItemMeta.label}.`,
-      })
+      emitFeedback('error', `${participant.name} is already checked in for ${selectedItemMeta.label}.`)
       return
     }
 
@@ -67,17 +117,11 @@ export default function ScannerPage() {
     setBusy(false)
 
     if (updateError) {
-      setResult({
-        type: 'error',
-        text: `Could not update ${selectedItemMeta.label}. Please try again.`,
-      })
+      emitFeedback('error', `Could not update ${selectedItemMeta.label}. Please try again.`)
       return
     }
 
-    setResult({
-      type: 'success',
-      text: `${participant.name} checked in for ${selectedItemMeta.label}.`,
-    })
+    emitFeedback('success', `${participant.name} checked in for ${selectedItemMeta.label}.`)
   }
 
   function extractUuid(input) {
@@ -90,22 +134,23 @@ export default function ScannerPage() {
     const uuid = extractUuid(rawValue)
     const { data, error: dbError } = await supabase.from('participants').select('*').eq('id', uuid).single()
     if (dbError || !data) {
-      setResult({ type: 'error', text: 'Participant not found for scanned QR.' })
+      emitFeedback('error', 'Participant not found for scanned QR.')
       return
     }
     await applyCheckIn(data)
   }
 
   async function lookupAndCheckInByEntryCode(rawCode) {
+    ensureAudioReady()
     const code = rawCode.trim().toUpperCase()
     if (!/^[A-Z0-9]{4}$/.test(code)) {
-      setResult({ type: 'error', text: 'Enter a valid 4-character code (A-Z, 0-9).' })
+      emitFeedback('error', 'Enter a valid 4-character code (A-Z, 0-9).')
       return
     }
     setManualCode(code)
     const { data, error: dbError } = await supabase.from('participants').select('*').eq('entry_code', code).single()
     if (dbError || !data) {
-      setResult({ type: 'error', text: 'No participant found for that manual code.' })
+      emitFeedback('error', 'No participant found for that manual code.')
       return
     }
     await applyCheckIn(data)
@@ -207,6 +252,43 @@ export default function ScannerPage() {
                     />
                   ))}
                 </div>
+                {frameFeedback && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 84,
+                        height: 84,
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: frameFeedback.type === 'success'
+                          ? 'rgba(16,185,129,0.2)'
+                          : 'rgba(239,68,68,0.2)',
+                        border: frameFeedback.type === 'success'
+                          ? '1px solid rgba(16,185,129,0.6)'
+                          : '1px solid rgba(239,68,68,0.6)',
+                        boxShadow: frameFeedback.type === 'success'
+                          ? '0 0 24px rgba(16,185,129,0.4)'
+                          : '0 0 24px rgba(239,68,68,0.35)',
+                      }}
+                    >
+                      {frameFeedback.type === 'success' ? (
+                        <CheckCircle2 size={44} style={{ color: '#6ee7b7' }} />
+                      ) : (
+                        <XCircle size={44} style={{ color: '#fca5a5' }} />
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
