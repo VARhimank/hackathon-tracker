@@ -180,16 +180,13 @@ export default function RegistrationPage() {
         <div style={S.card}>
           <div style={{ marginBottom: 36 }}>
             <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginBottom: 6, letterSpacing: '0.05em' }}>
-              Join the
+              Welcome to
             </p>
-            <h1 style={{ fontSize: 32, fontWeight: 800, color: '#fff', lineHeight: 1.15, marginBottom: 4 }}>
-              Hackathon
-            </h1>
             <h1 style={{
               fontSize: 32, fontWeight: 800, lineHeight: 1.15, marginBottom: 20,
               background: 'linear-gradient(90deg, #a78bfa, #ec4899)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            }}>2026</h1>
+            }}>Global AI Hackathon - Delhi Hub</h1>
             <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}>
               Fill in your details and we will send your personal QR pass — present it at every food, drinks and swag counter.
             </p>

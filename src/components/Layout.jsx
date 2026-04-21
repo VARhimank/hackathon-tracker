@@ -30,7 +30,7 @@ export default function Layout({ children, navRight }) {
             boxShadow: '0 0 16px rgba(124,58,237,0.4)',
           }}>H</div>
           <span style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)', letterSpacing: '0.01em' }}>
-            Hackathon
+            Global AI Hackathon - Delhi Hub
           </span>
         </div>
         {navRight && (
